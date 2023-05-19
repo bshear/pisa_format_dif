@@ -1,0 +1,491 @@
+---
+title: "PISA Item Formats Data Cleaning"
+author: "Benjamin Shear"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    toc: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages etc.
+
+```{r}
+library(tidyverse)
+library(kableExtra)
+```
+
+# Overview
+
+This markdown includes code to clean and prepare PISA 2009, 2012, and 2015 data for the item formats project analyses.
+
+First the file describes how the item format information was obtained and processed.
+
+## PISA
+
+Quick overview of the PISA data. Administrations 2009/2012/2015
+
+- 2009: 4th administration; paper-based; major domain was reading.
+- 2012: paper-based; major domain was math.
+- 2015: computerized; major domain was science.
+
+# Item Formats Files
+
+Preparing the item format files required some extra work, particularly for the 2009 and 2012 test administrations.
+
+I describe the process used below.
+
+## 2009
+
+The [PISA 2009 technical report](https://www.oecd.org/pisa/pisaproducts/50036771.pdf) has an appendix ("ANNEX A") that includes item covariate data. This includes a large table that includes, for each of the math, reading, and science items in the main assessment, information about the item's content, source, and psychometric properties (percent correct, Rasch item parameters). 
+
+Unfortunately, this table does not report the item format.
+
+The [scored item codebook](https://www.oecd.org/pisa/pisaproducts/Codebook_COG09_S_DEC11.pdf) does report item format using the following categories:
+
+- Multiple Choice (MC)
+- Closed Constructed Response (CCR)
+- Short Response (SR)
+- Open Constructed Response (OCR)
+
+We recorded each math/reading/science item's format into a CSV file with item names.
+
+The Annex A table was exported from the PDF to CSV file using the free software [Tabula](https://tabula.technology) which can be used to convert a PDF table to text format.
+
+These two CSV files were then combined to produce a final data frame with item names, formats, and the remaining information from the Annex.
+
+The R script below combines the formats and Annex A information and is run prior to this script.
+
+```{r}
+#source("2009/pisa2009_item_formats_process.R)
+```
+
+## 2012
+
+The [2012 PISA Technical Report](https://www.oecd.org/pisa/pisaproducts/PISA-2012-technical-report-final.pdf) contains an appendix ("Annex A") that also contains a large table with item information such as item content and psychometric properties. This table also includes item format information for each item. The item format options are:
+
+- Simple Multiple Choice (SMC)
+- Complex Multiple Choice (CMC)
+- Constructed Response Auto-coded (CRA)
+- Constructed Response Manual (CRM)
+- Constructed Response Expert (CRE)
+
+This multi-page Annex table was also exported to CSV using Tabula. This was converted to multiple sheets because the table is large enough in the PDF manual that the columns span two pages, with different structures on each page. Thus the Tabula features could recognize only one or the other set of pages at once. 
+
+The following code imports and combines the Tabula-produced CSV files for 2012.
+
+```{r}
+#source("2012/PISA-2012-technical-report-final-annex-a-tables.R")
+```
+
+## 2015
+
+The [2015 PISA Technical Report](https://www.oecd.org/pisa/data/2015-technical-report/) had data in a similar format to 2012. The report had a large table in Annex A with item covariate information including item formats. The table required multiple exports using Tabula, which were then processed and combined into CSV format using R.
+
+In 2015 the US PISA administration was primarily computerized. The item format categories (changed again slightly from prior years) were:
+
+- Simple Multiple Choice Computer Scored (SMC)
+- Complex Multiple Choice Computer Scored (CMC)
+- Open Response Computer Scored (ORC)
+- Open Response Human Coded (ORH)
+
+```{r}
+#source("2015/PISA2015_TechRep_Final-AnnexA-math-reading.R")
+```
+
+# Variable Definitions
+
+The final file will include the following item variables. Some are subject-specific or only apply for one subject.
+
+- year (numeric 2009/2012/2015/2018)
+- subject ("math" or "reading")
+- unit_name
+- item_id (complete item ID that matches scored item variables in PISA data files)
+- item_id_short
+- cluster
+- int_pval (international p-value)
+- int_slope
+- int_diff
+- int_step1
+- int_step2
+- item_format
+- is_mc
+- is_poly
+- process (subject-specific, see below)
+- process_short (abbreviated/consistent version of process)
+- subscale (math content area, see below)
+- text_format (reading format of text in item, see below)
+
+## Overview
+
+Math
+
+**Subscale.** (all years, but called "content" in 2012/2015))
+
+- Space and shape
+- change and relationships
+- Quantity
+- Uncertainty and data (changed to "uncertainty and data" in 2012 and 2015)
+
+**Process.** Not available in 2009. Categories are:
+
+- Formulate (in 2015/2018: Formulating Situations Mathematically)
+- Interpret (in 2015/2018: Interpreting, Applying and Evaluating Mathematical Outcomes)
+- Employ (in 2015/2018: Employing Mathematical Concepts, Facts and Procedures)
+
+Reading
+
+**Process.** (reading/cognitive process assessed):
+
+- Access and retrieve
+- Integrate and interpret
+- Reflect and evaluate
+
+**Text format.** (format of text presented in item)
+
+- Continuous
+- Mixed
+- Multiple
+- Non-continuous
+
+# Prepare files for merge
+
+This section prepares each year of item covariates for merging. This includes renaming variables to be consistent and adjusting coding of some subject-specific variables to be more consistent across years.
+
+## Read in year files
+
+Vector of final variable names:
+
+```{r}
+varnames <- c("year", "subject", "unit_name","cluster",
+              "item_id", "item_id_short",
+              "int_pval","int_pval_se",
+              "int_slope","int_diff","int_step1","int_step2",
+              "item_format","is_mc","is_poly",
+              "process", "process_short", "subscale",
+              "text_format")
+```
+
+### 2009
+
+```{r}
+it09 <- read.csv("item_formats/2009/pisa2009_item_formats.csv") %>%
+  rename(
+    item_id=item,
+    item_format=format,
+    int_pval=intl_pval,
+    int_pval_se=se_pval,
+    int_diff=delta,
+    int_step1=tau1,
+    int_step2=tau2,
+    subscale=scale) %>%
+  mutate(
+    item_id_short=
+      ifelse(item_id%in%c("R404Q10A", "R404Q10B"), # require one extra character to identify
+             str_sub(item_id,1,8),
+             str_sub(item_id,1,7)),
+    int_slope=NA,
+    subject=str_sub(item_id,1,1),
+    year=2009,
+    situation=NA,
+    text_type=NA,
+    is_mc=NA,
+    is_poly=NA,
+    process_short=NA) %>%
+  select(
+    all_of(varnames)
+  )
+
+it09 %>% group_by(item_id_short) %>% summarise(n=n()) %>% filter(n>1)
+it09 %>% group_by(item_id) %>% summarise(n=n()) %>% filter(n>1)
+```
+
+### 2012
+
+```{r}
+it12 <- read.csv(file = "item_formats/2012/pisa2012_annex_a_item_formats.csv") 
+names(it12)[which(!(names(it12)%in%varnames))]
+
+it12 <- it12 %>%
+  rename(
+    int_diff=delta,
+    int_step1=tau1,
+    int_step2=tau2,
+    subscale=scale
+  ) %>%
+  mutate(
+    item_id_short=
+      ifelse(item_id%in%c("PR404Q10A", "PR404Q10B"),
+             str_sub(item_id,2,9),
+             str_sub(item_id,2,8)),
+    subject=str_sub(item_id,2,2),
+    year=2012,
+    is_poly=NA,
+    is_mc=NA,
+    int_slope=NA,
+    int_pval_se=as.numeric(str_sub(int_pval_se,2,-2)),
+    process_short=NA) %>%
+  select(
+    all_of(varnames)
+  )
+
+table(it12$item_id, useNA="a")
+length(it12$item_id_short)
+length(unique(it12$item_id_short))
+it12 %>% group_by(item_id_short) %>% summarise(n=n()) %>% filter(n>1)
+```
+
+### 2015
+
+```{r}
+it15 <- read.csv(file = "item_formats/2015/pisa2015_item_formats_math.csv") %>%
+  mutate(
+    source_version=as.character(source_version)) %>%
+  bind_rows(., read.csv("item_formats/2015/pisa2015_item_formats_reading.csv"))
+
+it15 <- it15 %>%
+  rename(
+    item_id=item_id_cba,
+    unit_name=unit,
+    item_format=format_cba,
+    int_pval=cba_pval,
+    int_pval_se=cba_se,
+    int_slope=cba_slope,
+    int_diff=cba_diff,
+    int_step1=cba_step1,
+    int_step2=cba_step2,
+    subscale=content
+  ) %>%
+  mutate(
+    item_id_short=str_sub(item_id, 2, -2),
+    subject=str_sub(item_id,2,2),
+    year=2015,
+    is_poly=NA,
+    is_mc=NA,
+    text_type=NA,
+    process_short=NA) %>%
+  select(
+    all_of(varnames), "item_id_1", mode
+  )
+
+sum(is.na(it15$item_id))
+filter(it15, is.na(item_id))
+```
+
+Remove two items that were paper only.
+
+```{r}
+nrow(it15)
+it15 <- filter(it15, !is.na(item_id))
+nrow(it15)
+length(unique(it15$item_id_short))
+length(unique(it15$item_id))
+```
+
+Subset to final vars.
+
+```{r}
+it15 <- select(it15, all_of(varnames))
+```
+
+# Merge Files
+
+```{r}
+all_items <- rbind(it09, it12, it15)
+```
+
+# Recode variables for consistency
+
+## Formats
+
+Do not recode full format info - keep for potential use. Will create binary is_mc variable below.
+
+```{r}
+table(all_items$item_format, useNA="a")
+with(all_items, table(item_format, subject, year), useNA="a")
+```
+
+## Process 
+
+There is no "process" info for math in 2009. The math process domains in 2012/2015 are consistent, although wording changes slightly. These could be linked with the item_id_short variable.
+
+The reading process domains are consistent for 2009/2012/2015.
+
+```{r}
+with(all_items, table(process, year, useNA="a"))
+with(all_items, table(process, subject, year), useNA="a")
+with(all_items, table(process, subject), useNA="a")
+
+all_items <- all_items %>%
+  mutate(
+    process_short = process,
+    process_short = ifelse(
+      process_short %in% c("Employ",
+                           "Employing Mathematical Concepts,"),
+      "Employ", process_short),
+    process_short = ifelse(
+      process_short %in% c("Interpret",
+                           "Interpreting, Applying and Evaluating"),
+      "Interpret", process_short),
+    process_short = ifelse(
+      process_short %in% c("Formulate",
+                           "Formulating Situations Mathematically"),
+      "Formulate", process_short)
+  )
+```
+
+```{r}
+with(all_items, table(process_short, subject, useNA="a"))
+filter(all_items, subject=="M") %>% with(., table(process, process_short))
+filter(all_items, subject=="R") %>% with(., table(process, process_short))
+```
+
+Check that math process are consistent for item_id_short across years.
+
+There are two items that appear to show changes from 2012 to 2015. Perhaps due to reformatting for computer. The format of one also changes, from CR to CMC.
+
+```{r}
+all_items %>%
+  filter(
+    subject=="M",
+    !is.na(process_short)) %>%
+  group_by(subject, item_id_short) %>%
+  mutate(n=length(unique(process_short))) %>%
+  filter(n>1) %>%
+  arrange(item_id_short, item_id) %>%
+  select(year, subject, item_id_short, item_id, process, process_short, item_format)
+```
+
+```{r}
+pro12 <- all_items %>%
+  filter(!is.na(process_short), year==2012) %>%
+  select(subject,item_id_short,process_short) %>%
+  rename(pro12=process_short)
+
+pro15 <- all_items %>%
+  filter(!is.na(process_short), year==2015) %>%
+  select(subject,item_id_short,process_short) %>%
+  rename(pro15=process_short)
+
+pro <- inner_join(pro12,pro15)
+with(pro, table(pro12,pro15, subject,useNA="a"))
+```
+
+Seems appropriate to use the 2012 process based on format and name similarity.
+
+```{r}
+filter(all_items, item_id_short%in%c("M155Q01","M155Q02")) %>%
+  select(item_id_short, process_short, year, subject, item_format, unit_name,is_poly)
+```
+
+### Merge 2012 math process label to 2009 data
+
+We will use the observed item process for 2012 and merge to 2009 data based on item_id_short.
+
+```{r}
+mprocess12 <- all_items %>%
+  filter(subject=="M",year==2012,!is.na(process_short)) %>%
+  rename(process12=process_short) %>%
+  select(subject,item_id_short,process12)
+
+nrow(all_items)
+all_items <- left_join(all_items, mprocess12)
+all_items <- mutate(all_items,
+                    process_short=ifelse(subject=="M" & is.na(process_short) &
+                                           year==2009, process12, process_short))
+nrow(all_items)
+
+filter(all_items, year==2009, subject=="M") %>% with(., table(process_short, useNA="a"))
+```
+
+## Subscale
+
+Need to make the uncertainty category consistent across years. The order/capitalization of words changed, but the categories remain the same.
+
+```{r}
+with(all_items, table(subscale, year, useNA="a"))
+with(all_items, table(subscale, subject, useNA="a"))
+all_items <- all_items %>%
+  mutate(
+    subscale = ifelse(
+      subscale %in% c("Uncertainty", "Uncertainty and data", "Uncertainty and Data"),
+      "Uncertainty and data", subscale)
+  )
+with(all_items, table(subscale, year, useNA="a"))
+with(all_items, table(subscale, subject, useNA="a"))
+```
+
+## Text format
+
+This variable is for reading and is already consistently coded across years. However, there are so few mixed/multiple items that these two format categories will be combined in subsequent analyses.
+
+```{r}
+with(all_items, table(text_format, year, subject, useNA="a"))
+```
+
+# Create indicators
+
+## is_mc
+
+Indicator for MC items.
+
+```{r}
+with(all_items, table(item_format, year))
+all_items <- all_items %>%
+  mutate(
+    is_mc = ifelse(item_format %in% c("CMC", "Complex Multiple Choice",
+                                      "Complex Multiple Choice - Computer Scored",
+                                      "MC", "Simple Multiple Choice",
+                                      "Simple Multiple Choice - Computer Scored"), 1, 0)
+  )
+with(all_items, table(item_format, is_mc))
+with(all_items, table(is_mc))
+```
+
+## is_poly
+
+Indicator to flag polytomous items.
+
+```{r}
+all_items$is_poly <- ifelse(!is.na(all_items$int_step1),1,0)
+with(all_items, table(is.na(int_step1), is_poly))
+with(all_items, table(is_poly, year, subject))
+```
+
+# Show items across years
+
+```{r}
+all_items %>%
+  select(subject, year, item_id_short) %>%
+  mutate(one=1) %>%
+  pivot_wider(values_from="one", names_from="year") %>%
+  filter(subject=="M") %>%
+  arrange(`2009`,`2012`,`2015`) %>%
+  kable() %>% kable_styling()
+```
+
+```{r}
+all_items %>%
+  select(subject, year, item_id_short) %>%
+  mutate(one=1) %>%
+  pivot_wider(values_from="one", names_from="year") %>%
+  filter(subject=="R") %>%
+  arrange(`2009`,`2012`,`2015`) %>%
+  kable() %>% kable_styling()
+```
+
+# Save data file
+
+## 2009-2018
+
+```{r}
+all_items <- all_items %>%
+  select(all_of(varnames)) 
+all_items %>% head %>% kable() %>% kable_styling()
+write.csv(all_items, file = "1-item_formats_09_12_15.csv", row.names=FALSE)
+```
+

@@ -1,0 +1,339 @@
+---
+title: "Estimate IRT DIF Models using TAM"
+author: "Benjamin Shear"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    code_folding: hide
+---
+
+```{r}
+library(tidyverse)
+library(kableExtra)
+library(TAM)
+```
+
+# Load data
+
+```{r}
+d <- readRDS(file = "2d-cog-scored-long-allyears-standard-subset.Rds") %>%
+  arrange(CNT, YEAR, SUB, STUID, item_id)
+
+dusa <- filter(d, CNT=="USA") %>%
+  mutate(
+    FEMALE=ifelse(GENDER=="FEMALE",1,0),
+    RESP=ifelse(resp==8,0,resp), # full scored response
+    RESP_BIN=ypart # response to use for dichotomous scoring option
+  )
+
+dusa %>%
+  group_by(SUB,YEAR) %>%
+  summarise(nitem=length(unique(item_id)))
+
+outfilename1 <- "4a-usa-tam-models-ypart.Rds"
+outfilename2 <- "4a-usa-tam-dif-ests-ypart.csv"
+
+rm(d)
+gc()
+```
+
+# Model estimation function
+
+```{r}
+get_dif_results <- function(
+    use_year=NULL,
+    use_sub=NULL,
+    fulldat,
+    score_dichotomous=FALSE) {
+  
+  # pivot wider
+  # confirm:
+  # remove items with 0 complete responses
+  # remove students with 0 complete responses 
+  # convert polytomous to binary scoring if score_dichotomous=TRUE
+  
+  # for testing:
+  # use_year <- 2009
+  # use_sub <- "M"
+  # fulldat <- dusa
+  # score_dichotomous <- FALSE
+  # fulldat <- dusa
+  
+  results <- list()
+  
+  chck1 <- fulldat %>%
+    filter(YEAR==use_year,
+           SUB==use_sub) %>%
+    group_by(item_id) %>%
+    mutate(nresp=sum(!is.na(RESP))) %>%
+    ungroup()
+  
+  if(sum(chck1$nresp==0)>0) {
+    return(print("STOP: an item has no responses"))
+  }
+  
+  chck2 <- fulldat %>%
+    filter(YEAR==use_year,
+           SUB==use_sub) %>%
+    group_by(STUID) %>%
+    mutate(nresp=sum(!is.na(RESP))) %>%
+    ungroup()
+  
+  if(sum(chck2$nresp==0)>0) {
+    return(print("STOP: student has no responses"))
+  }
+  
+  d_wide <- fulldat %>%
+    filter(YEAR==use_year,
+           SUB==use_sub)
+  
+  if (score_dichotomous==TRUE) {
+    d_wide <- d_wide %>%
+      mutate(RESP=RESP_BIN)
+  }
+  
+  item_covs <- d_wide %>%
+    group_by(item_id,
+             is_mc, int_pval, is_poly,
+             subscale, text_format, process_short) %>%
+    summarise() %>% ungroup()
+  
+  d_wide <- d_wide  %>%
+    select(
+      YEAR, SUB,
+      STUID, BOOKID, FEMALE, item_id, RESP) %>%
+    pivot_wider(id_cols = c("STUID", "BOOKID", "FEMALE",
+                            "YEAR", "SUB"), 
+                names_from = "item_id",
+                values_from = "RESP") %>%
+    arrange(BOOKID, STUID)
+  
+  # item response matrix
+  resp_matrix <- d_wide[,item_covs$item_id]
+  
+  # gender indicator variable convert from 0/1 to 1/2 for TAM
+  # 1=female
+  # 2=male
+  facets <- data.frame(
+    female = d_wide$FEMALE+1
+  )
+  
+  # nitems
+  nitem <- ncol(resp_matrix)
+  
+  # total score summary stats
+  # compare total observed scores
+  tot <- apply(resp_matrix,1,function(x) {sum(x, na.rm=TRUE)})
+  
+  results$total_scores <- c(
+    mn_total = mean(tot),
+    sd_total = sd(tot),
+    min_total = min(tot),
+    max_total = max(tot),
+    mnf = mean(tot[facets$female==2]),
+    sdf = sd(tot[facets$female==2]),
+    mnm = mean(tot[facets$female==1]),
+    sdm = sd(tot[facets$female==1]),
+    nf  = sum(facets$female==2),
+    nm  = sum(facets$female==1)
+  )
+  
+  # add item responses matrix
+  results$X <- resp_matrix
+  
+  # add covariates matrix
+  results$facets <- facets
+  
+  # DIF model
+  
+  if (score_dichotomous==TRUE) {
+    
+    # Rasch model for dichotomous items
+    dif_model_ests <- tam.mml.mfr(
+      resp=resp_matrix,
+      facets=facets,
+      irtmodel = "PCM2",
+      formulaA= ~ item + female + item:female,
+      control=list(maxiter=10000,
+                   Msteps=10,
+                   fac.oldxsi=0.5),
+      verbose=FALSE)
+    
+  } else {
+    
+    # polytomous items - use PCM for polytomous items
+    dif_model_ests <- tam.mml.mfr(
+      resp=resp_matrix,
+      facets=facets,
+      irtmodel="PCM2",
+      formulaA= ~ 0 + item + item:step + female + item:female,
+      control=list(maxiter=10000,
+                   Msteps=10,
+                   fac.oldxsi=0.5),
+      verbose=FALSE)
+  }
+  
+  # No DIF model
+  
+  if (score_dichotomous == TRUE) {
+    nodif_model_ests <- tam.mml.mfr(
+      resp=resp_matrix,
+      facets=facets,
+      irtmodel="PCM2",
+      formulaA= ~ item,
+      control=list(maxiter=10000,
+                   Msteps=10,
+                   fac.oldxsi=0.5),
+      verbose=FALSE)
+  } else {
+    nodif_model_ests <- tam.mml.mfr(
+      resp=resp_matrix,
+      facets=facets,
+      irtmodel="PCM2",
+      formulaA= ~ item + item:step,
+      control=list(maxiter=10000,
+                   Msteps=10,
+                   fac.oldxsi=0.5),
+      verbose=FALSE)
+  }
+  
+  
+  results$dif_model_stats <- c(
+    reliability = dif_model_ests$EAP.rel,
+    theta_var = dif_model_ests$variance
+  )
+  
+  results$dif_model_ic <- dif_model_ests$ic
+  
+  results$xsi <- dif_model_ests$xsi
+  
+  results$all <- dif_model_ests
+  
+  # item difficulty for female students: xsi_item - xsi_male - xsi_item:male
+  # item difficulty for male students:   xsi_item + xsi_male + xsi_item:male
+  
+  # hence, conditional on the main effect, the DIF for each item is:
+  # DIF = 2 * xsi_item:male
+  # se(DIF) = 2*se(xsi_item:male)
+  
+  # a positive value indicates an item easier for female students
+  # a negative value indicates an item easier for male students
+  
+  # the DIF effects are identified by summing to 0, so the last item has DIF
+  # effect equal to sum of all other items
+  
+  xsi <- dif_model_ests$xsi
+  
+  # create summary table differently if using binary vs polytomous scoring
+  
+  if (score_dichotomous==TRUE) {
+    
+    dif_table <- data.frame(
+      year         = use_year,
+      subject      = use_sub,
+      item_id      = as.character(row.names(xsi)[1:nitem]),
+      
+      xsi          = xsi$xsi[1:nitem],
+      xsi_se       = xsi$se.xsi[1:nitem],
+      xsi_dif      = c(xsi$xsi[(nitem+2):nrow(xsi)],
+                       -sum(xsi$xsi[(nitem+2):nrow(xsi)])),
+      xsi_dif_se   = c(xsi$se.xsi[(nitem+2):nrow(xsi)],0),
+      main_eff     = rep(xsi[(nitem+1),"xsi"], nitem),
+      main_eff_se  = rep(xsi[(nitem+1),"se.xsi"], nitem),
+      theta_sd     = sqrt(dif_model_ests$variance),
+      nodif_sd     = sqrt(nodif_model_ests$variance)
+      
+    ) %>%
+      mutate(dif = 2*xsi_dif,
+             dif_se = 2*xsi_dif_se)
+    
+  } else {
+    
+    dif_table <- data.frame(
+      year         = use_year,
+      subject      = use_sub,
+      item_id      = as.character(row.names(xsi)[1:nitem]),
+      xsi          = xsi$xsi[1:nitem],
+      xsi_se       = xsi$se.xsi[1:nitem],
+      xsi_step1    = c(xsi$xsi[(nitem+2):((2*nitem)+1)]),
+      xsi_step1_se = c(xsi$se.xsi[(nitem+2):((2*nitem)+1)]),
+      xsi_dif      = c(xsi$xsi[(2*nitem+2):nrow(xsi)],
+                       -sum(xsi$xsi[(2*nitem+2):nrow(xsi)])),
+      xsi_dif_se   = c(xsi$se.xsi[(2*nitem+2):nrow(xsi)],0),
+      main_eff     = rep(xsi[(nitem+1),"xsi"], nitem),
+      main_eff_se  = rep(xsi[(nitem+1),"se.xsi"], nitem),
+      theta_sd     = sqrt(dif_model_ests$variance),
+      nodif_sd     = sqrt(nodif_model_ests$variance)
+    ) %>%
+      mutate(dif = 2*xsi_dif,
+             dif_se = 2*xsi_dif_se)
+    
+  }
+  
+  dif_table <- left_join(dif_table, item_covs, by = c("item_id"))
+  
+  results$dif_table <- dif_table
+  
+  results$d_wide <- d_wide
+  
+  results$score_dichotomous <- score_dichotomous
+  
+  results$nodifmod <- nodif_model_ests
+  
+  results$difmod <- dif_model_ests
+  
+  results$YEAR <- use_year
+  results$SUB <- use_sub
+  
+  return(results)
+  
+}
+
+```
+
+# Estimate models
+
+```{r}
+res_math_09 <- get_dif_results(use_year=2009, use_sub = "M", fulldat = dusa, score_dichotomous = TRUE)
+res_read_09 <- get_dif_results(use_year=2009, use_sub = "R", fulldat = dusa, score_dichotomous = TRUE)
+
+res_math_12 <- get_dif_results(use_year=2012, use_sub = "M", fulldat = dusa, score_dichotomous = TRUE)
+res_read_12 <- get_dif_results(use_year=2012, use_sub = "R", fulldat = dusa, score_dichotomous = TRUE)
+
+res_math_15 <- get_dif_results(use_year=2015, use_sub = "M", fulldat = dusa, score_dichotomous = TRUE)
+res_read_15 <- get_dif_results(use_year=2015, use_sub = "R", fulldat = dusa, score_dichotomous = TRUE)
+```
+
+# Results
+
+## Models list
+
+```{r}
+results_list <- list(
+  "M_2009"=res_math_09,
+  "M_2012"=res_math_12, 
+  "M_2015"=res_math_15,
+  "R_2009"=res_read_09,
+  "R_2012"=res_read_12,
+  "R_2015"=res_read_15)
+```
+
+## DIF table
+
+```{r}
+dif_ests <- do.call("rbind", lapply(results_list, function(x) {x$dif_table}))
+dif_ests %>%
+  group_by(year,subject) %>%
+  summarise(mn=mean(dif),
+            sd=sd(dif)) %>%
+  kable() %>% kable_styling()
+```
+
+# Save results
+
+```{r}
+saveRDS(results_list, outfilename1)
+write.csv(dif_ests, outfilename2)
+```
+

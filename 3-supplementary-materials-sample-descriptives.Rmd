@@ -1,0 +1,415 @@
+---
+title: "Supplementary Materials Tables"
+author: "Benjamin Shear"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Setup
+
+## Packages
+
+```{r}
+library(tidyverse)
+library(vtable)
+library(kableExtra)
+```
+
+## Functions
+
+```{r}
+# add summary stats at bottom of CNT-SUB-YEAR tables
+add_summary_rows <- function(x) {
+  
+  stats <- bind_cols(
+    CNT=c("Mean","SD","Min","Max"),
+    bind_rows(
+      apply(x[,-1],2,mean),
+      apply(x[,-1],2,sd),
+      apply(x[,-1],2,min),
+      apply(x[,-1],2,max)
+    ))
+
+  bind_rows(x,stats)
+  
+}
+```
+
+# Load Data
+
+```{r}
+d <- readRDS(file = "2d-cog-scored-long-allyears-standard-subset.rds") %>%
+  arrange(CNT, YEAR, SUB, STUID, item_id)
+
+d <- mutate(d,
+            FEMALE=ifelse(GENDER=="FEMALE",1,0))
+
+cnt_names <- read.csv(file = "0-CNT-codes.csv")
+d <- left_join(d, cnt_names, by="CNT")
+```
+
+# Table S3. Item Properties Summary
+
+```{r}
+item_data <- d %>%
+  mutate(is_mc=ifelse(is_mc==1,"MC","CR")) %>%
+  group_by(SUB, YEAR, item_id, is_mc, subscale, process_short, text_format) %>%
+  summarise() %>%
+  ungroup()
+
+items_all <- item_data %>%
+  group_by(SUB,YEAR,is_mc) %>%
+  summarise(N=n()) %>%
+  mutate(property="All") %>%
+  pivot_wider(names_from = c("YEAR","is_mc"), values_from="N")
+
+math_subscale <- item_data %>%
+  filter(SUB=="M") %>%
+  rename(property=subscale) %>%
+  group_by(SUB,YEAR,is_mc,property) %>%
+  summarise(N=n()) %>%
+  pivot_wider(names_from = c("YEAR","is_mc"), values_from="N")
+
+math_process <- item_data %>%
+  filter(SUB=="M") %>%
+  rename(property=process_short) %>%
+  group_by(SUB,YEAR,is_mc,property) %>%
+  summarise(N=n()) %>%
+  pivot_wider(names_from = c("YEAR","is_mc"), values_from="N")
+
+read_process <- item_data %>%
+  filter(SUB=="R") %>%
+  rename(property=process_short) %>%
+  group_by(SUB,YEAR,is_mc,property) %>%
+  summarise(N=n()) %>%
+  pivot_wider(names_from = c("YEAR","is_mc"), values_from="N")
+
+read_textformat <- item_data %>%
+  filter(SUB=="R") %>%
+  rename(property=text_format) %>%
+  group_by(SUB,YEAR,is_mc,property) %>%
+  summarise(N=n()) %>%
+  pivot_wider(names_from = c("YEAR","is_mc"), values_from="N")
+```
+
+```{r}
+bind_rows(
+  filter(items_all, SUB=="M"),
+  math_subscale,
+  math_process,
+  filter(items_all, SUB=="R"),
+  read_process,
+  read_textformat
+) %>%
+  kable() %>% kable_styling()
+```
+
+# Table S5. List of countries and languages
+
+```{r}
+d %>%
+  group_by(CNT, Country, YEAR, TESTLANG) %>%
+  summarise() %>%
+  pivot_wider(names_from="YEAR", values_from="TESTLANG") %>%
+  kable() %>% kable_styling()
+```
+
+# Table S6 Contents
+
+## Sample sizes by CNT-YEAR-SUB
+
+```{r}
+d %>%
+  group_by(CNT, YEAR, SUB) %>%
+  summarise(N=length(unique(STUID))) %>%
+  arrange(CNT, SUB, YEAR) %>%
+  pivot_wider(names_from = c("SUB","YEAR"), values_from="N")  %>%
+  arrange(CNT) %>%
+  add_summary_rows() %>%
+  kable() %>% kable_styling()
+```
+
+## Number of items by CNT-SUB-YEAR
+
+```{r}
+d %>%
+  group_by(CNT, YEAR, SUB) %>%
+  summarise(N=length(unique(item_id))) %>%
+  arrange(CNT, SUB, YEAR) %>%
+  pivot_wider(names_from = c("SUB","YEAR"), values_from="N")  %>%
+  arrange(CNT) %>%
+  ungroup() %>%
+  add_summary_rows() %>%
+  kable(digits=2) %>% kable_styling()
+```
+
+## Average item p-values by CNT-SUB-YEAR
+
+```{r}
+item_pvals <- d %>%
+  group_by(CNT, YEAR, SUB, item_id) %>%
+  summarise(P=mean(ypart)) %>%
+  group_by(CNT, YEAR, SUB) %>%
+  summarise(P=mean(P)) %>%
+  arrange(CNT, SUB, YEAR)
+
+item_pvals %>%
+  pivot_wider(names_from = c("SUB","YEAR"), values_from="P")  %>%
+  arrange(CNT) %>%
+  add_summary_rows() %>%
+  kable(digits=2) %>% kable_styling()
+```
+
+## Cohen's d based on observed scores by CNT-SUB-YEAR
+
+```{r}
+cohen_d_vals <- d %>%
+  group_by(CNT, SUB, YEAR, STUID, GENDER) %>%
+  summarise(X=mean(ypart)) %>%
+  group_by(CNT, SUB, YEAR) %>%
+  summarise(
+    d = (mean(X[GENDER=="FEMALE"])-mean(X[GENDER=="MALE"]))/
+      ((sd(X[GENDER=="FEMALE"])+sd(X[GENDER=="MALE"]))/2)
+  )
+
+cohen_d_vals %>%
+  pivot_wider(names_from = c("SUB","YEAR"), values_from="d") %>%
+  add_summary_rows() %>%
+  kable(digits=2) %>% kable_styling()
+```
+
+## Item format effects observed scores by CNT-SUB-YEAR
+
+```{r}
+dformat_vals <- d %>%
+  group_by(CNT, SUB, YEAR, STUID, GENDER, is_mc) %>%
+  summarise(X=mean(ypart)) %>%
+  group_by(CNT, SUB, YEAR, is_mc) %>%
+  summarise(
+    d = (mean(X[GENDER=="FEMALE"])-mean(X[GENDER=="MALE"]))/
+      ((sd(X[GENDER=="FEMALE"])+sd(X[GENDER=="MALE"]))/2)
+  ) %>%
+  pivot_wider(names_from = c("is_mc"), values_from="d") %>%
+  mutate(deff = `0`-`1`) %>%
+  select(-`0`, -`1`) %>%
+  ungroup()
+  
+dformat_vals %>%
+  pivot_wider(names_from = c("SUB","YEAR"), values_from="deff") %>%
+  add_summary_rows() %>%
+  kable(digits=2) %>% kable_styling()
+```
+
+# Table S7. Combined summary table all CNT
+
+```{r}
+item_cols <- d %>%
+  group_by(SUB,YEAR,item_id,is_mc) %>%
+  summarise(
+    x=mean(ypart)
+  ) %>%
+  group_by(SUB,YEAR) %>%
+  summarise(
+    NAll=n(),
+    NMC=sum(is_mc),
+    NCR=sum(is_mc==0),
+    PAll=mean(x),
+    PMC=mean(x[is_mc==1]),
+    PCR=mean(x[is_mc==0])
+  ) %>% ungroup()
+
+student_cols <- d %>%
+  group_by(SUB,YEAR,CNT,STUID,FEMALE,AGE,GRADE) %>%
+  summarise() %>%
+  group_by(SUB,YEAR) %>%
+  summarise(
+    N=n(),
+    `%Female`=mean(FEMALE),
+    MnAge=mean(AGE),
+    MnGrd=mean(GRADE)
+  )
+
+# Next, summarize differences in percent correct scores, limiting to students who responded to at least 1 MC and 1 CR
+
+perc_cor_diffs <- d %>%
+  group_by(CNT,SUB,YEAR,STUID,FEMALE) %>%
+  summarise(
+    N=n(),
+    NMC=sum(is_mc),
+    NCR=sum(is_mc==0),
+    All=mean(ypart),
+    MC=mean(ypart[is_mc==1]),
+    CR=mean(ypart[is_mc==0])
+  ) %>%
+  filter(N>=5,NMC>=1,NCR>=1) %>%
+  pivot_longer(c("All","MC","CR")) %>%
+  group_by(SUB,YEAR,name) %>%
+  summarise(
+    d=(mean(value[FEMALE==1])-mean(value[FEMALE==0]))/
+      ((sd(value[FEMALE==1])+sd(value[FEMALE==0]))/2),
+    N=n(),
+  ) %>%
+  pivot_wider(names_from="name",values_from=c("d","N")) %>%
+  mutate(d_Diff=d_CR-d_MC)
+
+# Now combine columns together. 
+
+left_join(item_cols, student_cols) %>%
+  select(SUB,YEAR,NAll,NCR,NMC,PAll,PCR,PMC,N,`%Female`) %>%
+  pivot_longer(cols = -c("SUB","YEAR")) %>%
+  unite(subyear, SUB,YEAR) %>%
+  pivot_wider(names_from = "subyear", values_from="value") %>%
+  bind_rows(., perc_cor_diffs %>%
+              select("SUB","YEAR", starts_with("d_")) %>%
+              pivot_longer(cols = -c("SUB","YEAR")) %>%
+              unite(subyear, SUB,YEAR) %>%
+              pivot_wider(names_from = "subyear", values_from="value")) %>%
+  arrange(match(name,c(
+    "NAll","NCR","NMC",
+    "PAll","PCR","PMC",
+    "d_All","d_CR","d_MC", "d_Diff",
+    "N","%Female"))) %>%
+  kable(digits=3) %>% kable_styling()
+```
+
+# Extra figures
+
+```{r}
+combined_vals <- left_join(item_pvals, cohen_d_vals) %>%
+  left_join(., dformat_vals)
+```
+
+```{r}
+combined_vals %>%
+  ggplot(aes(x=d, y=deff)) +
+  geom_point() +
+  facet_grid(SUB~YEAR)
+```
+
+```{r}
+combined_vals %>%
+  ggplot(aes(x=d, y=P)) +
+  geom_point() +
+  facet_grid(SUB~YEAR)
+```
+
+```{r, fig.height=10, fig.width=10}
+combined_vals %>%
+  pivot_longer(cols = c("P","d","deff")) %>%
+  ggplot(aes(x=value)) +
+  geom_histogram(fill="grey", color="black") +
+  facet_grid(SUB+YEAR~name, scales="free_x")
+```
+
+```{r, fig.height=5, fig.width=10}
+combined_vals %>%
+  pivot_longer(cols = c("P","d","deff")) %>%
+  ggplot(aes(x=CNT, y=value)) +
+  geom_point() +
+  facet_grid(name~SUB+YEAR)
+```
+
+
+# Sensitivity checks.
+
+## Item Format Effects - full credit scoring
+
+1=full credit; 0=no or part credit
+
+```{r}
+format_effects_full <- d %>%
+  group_by(CNT, SUB, YEAR, STUID, GENDER, is_mc) %>%
+  summarise(X=mean(yfull)) %>%
+  group_by(CNT, SUB, YEAR, is_mc) %>%
+  summarise(
+    d = (mean(X[GENDER=="FEMALE"])-mean(X[GENDER=="MALE"]))/
+      ((sd(X[GENDER=="FEMALE"])+sd(X[GENDER=="MALE"]))/2)
+  ) %>%
+  pivot_wider(names_from = c("is_mc"), values_from="d") %>%
+  mutate(eff = `0`-`1`) %>%
+  select(-`0`, -`1`)
+
+format_effects_full %>%
+  pivot_wider(names_from = c("SUB","YEAR"), values_from="eff") %>%
+  add_summary_rows() %>%
+  kable(digits=2) %>% kable_styling()
+```
+
+## Item Format Effects - partial credit scoring
+
+1=part or full credit; 0=no credit
+
+```{r}
+format_effects_part <- d %>%
+  group_by(CNT, SUB, YEAR, STUID, GENDER, is_mc) %>%
+  summarise(X=mean(ypart)) %>%
+  group_by(CNT, SUB, YEAR, is_mc) %>%
+  summarise(
+    d = (mean(X[GENDER=="FEMALE"])-mean(X[GENDER=="MALE"]))/
+      ((sd(X[GENDER=="FEMALE"])+sd(X[GENDER=="MALE"]))/2)
+  ) %>%
+  pivot_wider(names_from = c("is_mc"), values_from="d") %>%
+  mutate(eff = `0`-`1`) %>%
+  select(-`0`, -`1`)
+
+format_effects_part %>%
+  pivot_wider(names_from = c("SUB","YEAR"), values_from="eff") %>%
+  add_summary_rows() %>%
+  kable(digits=2) %>% kable_styling()
+```
+
+## Item Format Effects - random groups
+
+Robustness check - use a random grouping variable instead of GENDER. How do item format effects look then?
+
+```{r}
+set.seed(112822)
+
+d$RUNIF <- round(runif(n = nrow(d)))
+
+format_effects_rand <- d %>%
+  mutate(
+    GENDER_R = ifelse(RUNIF==1,"FEMALE","MALE")
+  ) %>%
+  group_by(CNT, SUB, YEAR, STUID, GENDER_R, is_mc) %>%
+  summarise(X=mean(ypart)) %>%
+  group_by(CNT, SUB, YEAR, is_mc) %>%
+  summarise(
+    d = (mean(X[GENDER_R=="FEMALE"])-mean(X[GENDER_R=="MALE"]))/((sd(X[GENDER_R=="FEMALE"])+sd(X[GENDER_R=="MALE"]))/2)
+  ) %>%
+  pivot_wider(names_from = c("is_mc"), values_from="d") %>%
+  mutate(eff = `0`-`1`) %>%
+  select(-`0`, -`1`)
+
+format_effects_rand %>% 
+  pivot_wider(names_from = c("SUB","YEAR"), values_from="eff") %>%
+  add_summary_rows() %>%
+  kable(digits=2) %>% kable_styling()
+```
+
+## Summary Comparison
+
+```{r}
+format_effects_full$type <- "fullcredit"
+format_effects_part$type <- "partcredit"
+format_effects_rand$type <- "randomgrp"
+bind_rows(format_effects_full,
+          format_effects_part,
+          format_effects_rand) %>%
+  group_by(type, SUB) %>%
+  summarise(
+    N=n(),
+    Mn=mean(eff),
+    sd=sd(eff)
+  ) %>%
+  pivot_wider(names_from="SUB", values_from=c("Mn","sd"))
+```
+
+

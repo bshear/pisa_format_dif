@@ -1,0 +1,318 @@
+---
+title: "Summary and regression models for US Rasch DIF Estimates"
+author: "Benjamin Shear"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    code_folding: hide
+---
+
+# Setup
+
+```{r}
+library(tidyverse)
+library(kableExtra)
+library(TAM)
+library(vtable)
+library(sjPlot)
+library(metafor)
+```
+
+# Load data
+
+```{r}
+dif <- read.csv(file = "4a-usa-tam-dif-ests-ypart.csv")
+```
+
+# Prepare data for regression analysis
+
+```{r}
+dif <- dif %>%
+  mutate(
+    
+    is_cr = 1-is_mc,
+    year12=ifelse(year==2012,1,0),
+    year15=ifelse(year==2015,1,0),
+    
+    # create dummies for summary stats
+    sub_quant=ifelse(subscale=="Quantity",1,0),
+    sub_data=ifelse(subscale=="Uncertainty and data",1,0),
+    sub_space=ifelse(subscale=="Space and Shape",1,0),
+    sub_chng=ifelse(subscale=="Change and Relationships",1,0),
+    
+    proc_emp=ifelse(process_short=="Employ",1,0),
+    proc_form=ifelse(process_short=="Formulate",1,0),
+    proc_int_m=ifelse(process_short=="Interpret",1,0),
+    
+    proc_int_r=ifelse(process_short=="Integrate and interpret",1,0),
+    proc_ref=ifelse(process_short=="Reflect and evaluate",1,0),
+    proc_acc=ifelse(process_short=="Access and retrieve",1,0),
+    
+    txt_cont=ifelse(text_format=="Continuous",1,0),
+    txt_mix=ifelse(text_format%in%c("Mixed","Multiple"),1,0),
+    txt_non=ifelse(text_format=="Non-continuous",1,0)
+  ) %>%
+  arrange(subject, year, item_id) %>%
+  group_by(subject) %>%
+  mutate(
+    xsi_c=xsi-mean(xsi),
+  ) %>% ungroup() %>%
+  select(
+    subject, year, item_id,
+    year12, year15,
+    theta_sd, main_eff,
+    int_pval, is_cr, is_mc,
+    xsi_dif, xsi_dif_se,
+    xsi, xsi_se, xsi_c,
+    dif, dif_se,
+    subscale, process_short, text_format,
+    starts_with("sub_"),
+    starts_with("proc_"),
+    starts_with("txt_")
+  )
+```
+
+```{r}
+saveRDS(dif, file = "4b-dif-estimates-data-US-ypart.RDS")
+```
+
+Add in SE of the left out item with DIF equal to sum of all other items.
+
+```{r}
+dif <- dif %>%
+  group_by(subject, year) %>%
+  mutate(
+    xsi_dif_se = ifelse(xsi_dif_se==0, sqrt(sum(xsi_dif_se^2)), xsi_dif_se),
+    dif_se=ifelse(dif_se==0, xsi_dif_se*2, dif_se)
+  ) %>% ungroup()
+```
+
+# Boxplot of DIF estimates
+
+```{r}
+dif %>%
+  mutate(
+    format=ifelse(is_mc==1,"MC","CR"),
+    sub=ifelse(subject=="M","Math","Reading"),
+    DIF=dif
+  ) %>%
+  ggplot(aes(x=format, y=DIF)) +
+  geom_hline(yintercept = 0) +
+  geom_boxplot(color="grey", outlier.shape = NA, width=0.3) +
+  geom_jitter(color="black", size=1, alpha=0.6, width=0.02) +
+  facet_grid(sub~year) +
+  xlab("") + 
+  theme_bw(base_size = 14)
+```
+
+# Boxplot of DIF, with significance
+
+```{r}
+dif %>%
+  mutate(
+    format=ifelse(is_mc==1,"MC","CR"),
+    sub=ifelse(subject=="M","Math","Reading"),
+    DIF=dif,
+    sig=ifelse((abs(dif)/dif_se)>1.96,"sig.","non-sig.")
+  ) %>%
+  ggplot(aes(x=format, y=DIF)) +
+  geom_hline(yintercept = 0) +
+  geom_boxplot(color="grey", outlier.shape = NA, width=0.3) +
+  geom_jitter(aes(color=sig), size=1, alpha=0.6, width=0.02) +
+  facet_grid(sub~year) +
+  xlab("") + 
+  theme_bw(base_size = 14)
+```
+
+# Summary Tables
+
+```{r}
+dif %>%
+  group_by(subject, year, is_mc, main_eff, theta_sd) %>%
+  summarise(n=n(),
+            mndif=mean(dif),
+            meddif=median(dif),
+            mindif=min(dif),
+            maxdif=max(dif)) %>%
+  mutate(is_mc=ifelse(is_mc==1,"MC","CR")) %>%
+  pivot_wider(names_from = "is_mc", values_from = c("n", "mndif","meddif", "mindif","maxdif")) %>%
+  mutate(format_diff=mndif_CR-mndif_MC,
+         format_diff_es=format_diff/theta_sd,
+         d=(main_eff*2)/theta_sd,
+         n_item=n_MC+n_CR) %>%
+  dplyr::select(subject, year,
+                mndif_CR, meddif_CR, mindif_CR, maxdif_CR,
+                mndif_MC, meddif_MC, mindif_MC, maxdif_MC,
+                format_diff_es, d,
+                theta_sd,
+                format_diff, main_eff, n_MC, n_CR, n_item) %>%
+  data.frame() %>%
+  kable(digits=2) %>% kable_styling()
+```
+
+# statistical significance of DIF
+
+```{r}
+dif %>%
+  mutate(
+    is_sig=ifelse(abs(dif)/dif_se>1.96, 1, 0)
+  ) %>%
+  group_by(subject, is_mc) %>%
+  summarise(
+    n=n(),
+    nsig=sum(is_sig),
+    pos_sig=sum(dif>0 & is_sig==1),
+    neg_sig=sum(dif<0 & is_sig==1)
+  ) %>%
+  kable() %>% kable_styling()
+```
+
+# Regression Models
+
+## math and reading data files
+
+```{r}
+m_d <- filter(dif, subject=="M")
+r_d <- filter(dif, subject=="R")
+```
+
+## Descriptive statistics
+
+### math
+
+```{r}
+df_math <- m_d %>%
+  select(dif, dif_se, is_cr, xsi_c,
+         proc_emp, proc_form, proc_int_m,
+         sub_chng, sub_quant, sub_space, sub_data,
+         year12, year15)
+
+sumtable(df_math)
+```
+
+### reading
+
+```{r}
+df_read <- r_d %>%
+  select(dif, dif_se, is_cr, xsi_c,
+         proc_acc, proc_int_r, proc_ref,
+         txt_cont, txt_mix, txt_non,
+         year12, year15) 
+
+sumtable(df_read)
+```
+
+## OLS models
+
+### Math
+
+```{r}
+m_lm1 <- lm(dif ~ is_cr + factor(year), data = m_d)
+m_lm2 <- lm(dif ~ is_cr + factor(year) + xsi_c + subscale + process_short, data = m_d)
+```
+
+```{r}
+tab_model(m_lm1, m_lm2, show.se=TRUE, show.ci=FALSE, string.est="B", string.se="SE")
+```
+
+#### Residuals plots
+
+```{r}
+plot(m_lm2)
+```
+
+### Reading
+
+```{r}
+r_lm1 <- lm(dif ~ is_cr + factor(year), data = r_d)
+r_lm2 <- lm(dif ~ is_cr + factor(year) + xsi_c + process_short + txt_mix + txt_non, data = r_d)
+```
+
+```{r}
+tab_model(r_lm1, r_lm2, show.se=TRUE, show.ci=FALSE, string.est="B", string.se="SE")
+```
+
+#### Residuals plots
+
+```{r}
+plot(r_lm2)
+r_d$leverage <- hatvalues(r_lm2)
+r_d %>%
+  arrange(-leverage) %>%
+  select(year, subject, item_id, is_mc, dif, xsi_c, process_short, text_format, leverage) %>%
+  filter(leverage>0.1) %>%
+  kable(digits=2) %>% kable_styling()
+```
+
+### save models
+
+These can be imported and tabled later.
+
+```{r}
+lm_models <- list(m_lm1, m_lm2, r_lm1, r_lm2)
+saveRDS(lm_models, file = "4b-lm-models-US-ypart.rds")
+```
+
+## metaregression models for Table S8
+
+### math
+
+```{r}
+m_rma1 <- rma(yi = dif, sei = dif_se,
+              mods = ~ is_cr + factor(year),
+              method = "REML",
+              data = m_d)
+m_rma2 <- rma(yi = dif, sei = dif_se,
+              mods = ~ is_cr + factor(year) + xsi_c + subscale + process_short,
+              method = "REML",
+              data = m_d)
+
+summary(m_rma1)
+summary(m_rma2)
+
+tab_model(m_rma1,m_rma2,m_lm1,m_lm2,
+          show.ci=FALSE,show.se=TRUE)
+```
+
+### read
+
+```{r}
+r_rma1 <- rma(yi = dif, sei = dif_se,
+              method = "REML",
+              mods = ~ is_cr + factor(year), data = r_d)
+
+r_rma2 <- rma(yi = dif, sei = dif_se,
+              mods = ~ is_cr + factor(year) + xsi_c + process_short + txt_non + txt_mix, 
+              method = "REML",
+              data = r_d)
+
+summary(r_rma1)
+summary(r_rma2)
+
+tab_model(r_rma1,r_rma2,r_lm1,r_lm2,
+          show.ci=FALSE,show.se=TRUE)
+```
+
+```{r}
+tab_model(m_rma1,m_rma2,r_rma1, r_rma2,
+          show.ci=FALSE,show.se=TRUE, p.style = "star",
+          string.est="Est.", string.se="SE",
+          dv.labels = c("Math 1", "Math 2", "Reading 1", "Reading 2"),
+          pred.labels = c(
+            `(Intercept)`="Intercept",
+            is_cr="Is CR",
+            xsi_c="Difficulty",
+            subscaleQuantity="Quantity",
+            `subscaleSpace and Shape`="Space and Shape",
+            `subscaleUncertainty and data`="Uncertainty and Data",
+            `process_shortFormulate` = "Formulate",
+            `process_shortInterpret` = "Interpret",
+            `process_shortIntegrate and interpret`="Integrate and Interpret",
+            `process_shortReflect and evaluate`="Reflect and Evaluate",
+            `txt_mix`="Text Mixed/Multiple",
+            `txt_non`="Text Non-continuous"
+          ),          
+          file = "4b-metareg-model-table.xls")
+```
+
