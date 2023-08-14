@@ -1,4 +1,4 @@
-Code to accompany the paper "Gender Bias in Test Item Formats: Evidence from PISA 2009, 2012, and 2015 Math and Reading Tests".
+Code to accompany the paper ["Gender Bias in Test Item Formats: Evidence from PISA 2009, 2012, and 2015 Math and Reading Tests"](https://onlinelibrary.wiley.com/doi/full/10.1111/jedm.12372).
 
 1: item format prep
 
