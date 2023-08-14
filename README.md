@@ -12,6 +12,8 @@ Code to accompany the paper ["Gender Bias in Test Item Formats: Evidence from PI
 
 6: Paper tables and figures
 
+Online Supplementary Materials PDF [here](https://github.com/bshear/pisa_format_dif/blob/main/submit_item_formats_osm_accepted.pdf).
+
 Technical documentation for item format information are available at the following links.
 
 PISA 2009: https://www.oecd.org/pisa/pisaproducts/50036771.pdf (Annex A and Cognitive Item codebook)
